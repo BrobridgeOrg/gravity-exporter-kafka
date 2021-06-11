@@ -4,50 +4,38 @@ import (
 	//"time"
 
 	"github.com/BrobridgeOrg/gravity-exporter-kafka/pkg/app"
+	"github.com/Shopify/sarama"
 	log "github.com/sirupsen/logrus"
-	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
-
-type Options struct {
-	ClientName string
-}
-
-type EventBusHandler struct {
-	Reconnect  func()
-	Disconnect func()
-}
 
 type EventBus struct {
 	app        app.App
-	connection *kafka.Producer
-	host       string
-	handler    *EventBusHandler
-	options    *Options
+	connection sarama.AsyncProducer
+	hosts      []string
 }
 
-func NewEventBus(a app.App, host string, options Options) *EventBus {
+func NewEventBus(a app.App, hosts []string) *EventBus {
 	return &EventBus{
 		app:        a,
+		hosts:      hosts,
 		connection: nil,
-		host:       host,
-		options:    &options,
 	}
 }
 
 func (eb *EventBus) Connect() error {
 
 	log.WithFields(log.Fields{
-		"host": eb.host,
+		"host": eb.hosts,
 	}).Info("Connecting to Kafka server")
 
-	conn, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": eb.host,
-	})
+	config := sarama.NewConfig()
+
+	prd, err := sarama.NewAsyncProducer(eb.hosts, config)
 	if err != nil {
-		log.Error(err)
+		return err
 	}
 
-	eb.connection = conn
+	eb.connection = prd
 
 	return nil
 }
@@ -56,6 +44,6 @@ func (eb *EventBus) Close() {
 	eb.connection.Close()
 }
 
-func (eb *EventBus) GetConnection() *kafka.Producer {
+func (eb *EventBus) GetConnection() sarama.AsyncProducer {
 	return eb.connection
 }

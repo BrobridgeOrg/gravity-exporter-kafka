@@ -1,11 +1,11 @@
 package eventbus
 
 import (
-	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
+	"github.com/Shopify/sarama"
 )
 
 type EventBus interface {
 	Connect() error
 	Close()
-	GetConnection() *kafka.Producer
+	GetConnection() sarama.AsyncProducer
 }
