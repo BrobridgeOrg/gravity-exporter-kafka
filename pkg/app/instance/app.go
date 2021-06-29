@@ -2,6 +2,7 @@ package instance
 
 import (
 	"runtime"
+	"strings"
 
 	eventbus "github.com/BrobridgeOrg/gravity-exporter-kafka/pkg/eventbus/service"
 	subscriber "github.com/BrobridgeOrg/gravity-exporter-kafka/pkg/subscriber/service"
@@ -31,10 +32,11 @@ func (a *AppInstance) Init() error {
 	}).Info("Starting application")
 
 	// get kafka host
-	kafkaHost := []string{viper.GetString("kafka.host")}
+	kafkaHostStr := viper.GetString("kafka.hosts")
+	kafkaHosts := strings.Split(kafkaHostStr, ",")
 
 	// Initializing modules
-	a.eventBus = eventbus.NewEventBus(a, kafkaHost)
+	a.eventBus = eventbus.NewEventBus(a, kafkaHosts)
 
 	a.subscriber = subscriber.NewSubscriber(a)
 

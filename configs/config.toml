@@ -15,4 +15,4 @@ pipeline_end = -1
 subscription = "./settings/subscriptions.json"
 
 [kafka]
-host = "192.168.1.170:31090"
+hosts = "192.168.1.170:31090,192.168.1.171:31090"
