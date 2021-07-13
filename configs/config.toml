@@ -4,7 +4,7 @@ host = "0.0.0.0:32803"
 
 [subscriber]
 subscriber_id = "kafka_exporter"
-subscriber_name = "KAFKA Exporter"
+subscriber_name = "Kafka Exporter"
 state_store = "./statestore"
 worker_count = 4
 verbose = true
