@@ -13,17 +13,27 @@ import (
 	"github.com/BrobridgeOrg/gravity-sdk/core/keyring"
 	gravity_subscriber "github.com/BrobridgeOrg/gravity-sdk/subscriber"
 	gravity_state_store "github.com/BrobridgeOrg/gravity-sdk/subscriber/state_store"
-	gravity_sdk_types_projection "github.com/BrobridgeOrg/gravity-sdk/types/projection"
+	gravity_sdk_types_record "github.com/BrobridgeOrg/gravity-sdk/types/record"
+
 	"github.com/Shopify/sarama"
+	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
 var counter uint64 = 0
 
-var projectionPool = sync.Pool{
+type Packet struct {
+	EventName  string                 `json:"event"`
+	Collection string                 `json:"collection"`
+	Payload    map[string]interface{} `json:"payload"`
+	Meta       map[string]interface{} `json:"meta"`
+}
+
+var packetPool = sync.Pool{
 	New: func() interface{} {
-		return &gravity_sdk_types_projection.Projection{}
+		return &Packet{}
 	},
 }
 
@@ -49,19 +59,14 @@ func (subscriber *Subscriber) processData(msg *gravity_subscriber.Message) error
 		}
 	*/
 
-	pj := projectionPool.Get().(*gravity_sdk_types_projection.Projection)
-	defer projectionPool.Put(pj)
-
-	// Parsing data
-	err := gravity_sdk_types_projection.Unmarshal(msg.Event.Data, pj)
-	if err != nil {
-		return err
-	}
+	event := msg.Payload.(*gravity_subscriber.DataEvent)
+	pj := event.Payload
 
 	// Getting channels for specific collection
 	channels, ok := subscriber.ruleConfig.Subscriptions[pj.Collection]
 	if !ok {
-		return err
+		// skip
+		return nil
 	}
 
 	// Convert projection to record
@@ -156,6 +161,9 @@ func (subscriber *Subscriber) Init() error {
 	options.Domain = domain
 	options.StateStore = subscriber.stateStore
 	options.WorkerCount = viper.GetInt("subscriber.workerCount")
+	options.ChunkSize = viper.GetInt("subscriber.chunkSize")
+	options.InitialLoad.Enabled = viper.GetBool("initialLoad.enabled")
+	options.InitialLoad.OmittedCount = viper.GetUint64("initialLoad.omittedCount")
 
 	// Loading access key
 	viper.SetDefault("subscriber.appID", "anonymous")
@@ -171,6 +179,7 @@ func (subscriber *Subscriber) Init() error {
 
 	// Setup data handler
 	subscriber.subscriber.SetEventHandler(subscriber.eventHandler)
+	subscriber.subscriber.SetSnapshotHandler(subscriber.snapshotHandler)
 
 	// Register subscriber
 	log.Info("Registering subscriber")
@@ -256,6 +265,83 @@ func (subscriber *Subscriber) eventHandler(msg *gravity_subscriber.Message) {
 		log.Error(err)
 		return
 	}
+}
+
+func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
+
+	event := msg.Payload.(*gravity_subscriber.SnapshotEvent)
+	snapshotRecord := event.Payload
+
+	// Getting tables for specific collection
+	channels, ok := subscriber.ruleConfig.Subscriptions[event.Collection]
+	if !ok {
+		return
+	}
+
+	// Prepare record for event
+	var record gravity_sdk_types_record.Record
+	err := gravity_sdk_types_record.UnmarshalMapData(snapshotRecord.Payload.AsMap(), &record)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	// Send event to each channel
+	conn := subscriber.app.GetEventBus().GetConnection()
+	for _, channel := range channels {
+
+		var rs gravity_sdk_types_record.Record
+		copier.Copy(&rs, record)
+
+		// TODO: using batch mechanism to improve performance
+		packet := packetPool.Get().(*Packet)
+
+		//Scanning fields
+		payload := make(map[string]interface{}, len(rs.Fields))
+		for _, field := range rs.Fields {
+			key := field.Name
+			value := gravity_sdk_types_record.GetValue(field.Value)
+			payload[key] = value
+		}
+
+		packet.EventName = "snapshot"
+		packet.Payload = payload
+		packet.Collection = event.Collection
+
+		if snapshotRecord.Meta != nil {
+			packet.Meta = snapshotRecord.Meta.AsMap()
+		}
+
+		//convert to byte
+		newPacket, err := jsoniter.Marshal(packet)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+
+		msg := &sarama.ProducerMessage{
+			Topic: channel,
+			Value: sarama.StringEncoder(newPacket),
+		}
+
+		//send snapshot event
+	ProducerLoop:
+		for {
+			select {
+			case conn.Input() <- msg:
+				packetPool.Put(packet)
+				break
+			case err := <-conn.Errors():
+				log.Error(err)
+
+				<-time.After(time.Second * 5)
+				break ProducerLoop
+			}
+			break
+
+		}
+	}
+	msg.Ack()
 }
 
 func (subscriber *Subscriber) Run() error {
