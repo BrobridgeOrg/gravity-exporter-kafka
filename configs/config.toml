@@ -17,7 +17,7 @@ appID = "anonymous"
 accessKey = ""
 
 [initialLoad]
-enabled = false
+enabled = true
 omittedCount = 100000
 
 [rules]
