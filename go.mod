@@ -3,7 +3,7 @@ module github.com/BrobridgeOrg/gravity-exporter-kafka
 go 1.13
 
 require (
-	github.com/BrobridgeOrg/gravity-sdk v0.0.42
+	github.com/BrobridgeOrg/gravity-sdk v0.0.43
 	github.com/Shopify/sarama v1.29.0
 	github.com/json-iterator/go v1.1.10
 	github.com/prometheus/common v0.4.0
